@@ -6,3 +6,5 @@ plotly
 streamlit
 folium
 scikit-learn
+openai
+dotenv
