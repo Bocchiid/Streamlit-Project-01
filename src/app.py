@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from data_processor import DataProcessor
 from llm_handler import LLMHandler
-from config import DEEPSEEK_API_KEY
+from config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -18,7 +18,8 @@ def main():
     if "llm" not in st.session_state:
         st.session_state.llm = LLMHandler(
             api_key=DEEPSEEK_API_KEY, 
-            base_url="https://api.deepseek.com" # 或通义千问等其他中转地址
+            base_url="https://api.deepseek.com",
+            model=DEEPSEEK_MODEL
         )
 
     # 初始化数据处理模块
@@ -111,6 +112,7 @@ def main():
                         st.info(viz["interpretation"])
                 except Exception as e:
                     st.error(f"图表渲染出错: {e}")
+
 
 if __name__ == "__main__":
     main()
