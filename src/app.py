@@ -100,6 +100,33 @@ def main():
                 st.session_state.current_prompt = prompt
                 st.rerun()
 
+            if st.session_state.is_generating:
+
+                current_prompt = st.session_state.get("current_prompt")
+
+                if current_prompt:
+                    with st.spinner("AI 正在分析并绘图..."):
+                        try:
+                            # 使用processor获取精简后的元数据和采样
+                            current_data_info = processor.get_basic_info()
+                            sample_df = processor.get_n_rows(5) 
+                            
+                            result = st.session_state.llm.chat_for_visualization(
+                                current_prompt, 
+                                data_info=current_data_info, 
+                                sample_df=sample_df,
+                                history=st.session_state.messages[-5:]
+                            )
+                            if result and result["code"]:
+                                # [关键修改]将结果存入session_state，防止Slider刷新导致消失
+                                st.session_state.last_viz = result
+                                st.session_state.messages.append({"role": "user", "content": current_prompt})
+                                st.session_state.messages.append({"role": "assistant", "content": result["raw_response"]})
+                        finally:
+                            st.session_state.is_generating = False
+                            st.session_state.current_prompt = None
+                            st.rerun()
+
             # 渲染区：放在if prompt之外，确保每次重跑都能显示
             if st.session_state.last_viz:
                 viz = st.session_state.last_viz
@@ -140,33 +167,6 @@ def main():
                             )
                     except Exception as e:
                         st.error(f"图表渲染出错: {e}")
-
-            if st.session_state.is_generating:
-
-                current_prompt = st.session_state.get("current_prompt")
-
-                if current_prompt:
-                    with st.spinner("AI 正在分析并绘图..."):
-                        try:
-                            # 使用processor获取精简后的元数据和采样
-                            current_data_info = processor.get_basic_info()
-                            sample_df = processor.get_n_rows(5) 
-                            
-                            result = st.session_state.llm.chat_for_visualization(
-                                current_prompt, 
-                                data_info=current_data_info, 
-                                sample_df=sample_df,
-                                history=st.session_state.messages[-5:]
-                            )
-                            if result and result["code"]:
-                                # [关键修改]将结果存入session_state，防止Slider刷新导致消失
-                                st.session_state.last_viz = result
-                                st.session_state.messages.append({"role": "user", "content": current_prompt})
-                                st.session_state.messages.append({"role": "assistant", "content": result["raw_response"]})
-                        finally:
-                            st.session_state.is_generating = False
-                            st.session_state.current_prompt = None
-                            st.rerun()
 
 
 if __name__ == "__main__":
