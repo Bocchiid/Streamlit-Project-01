@@ -1,0 +1,43 @@
+---
+name: visualization-skill
+description: "使用Plotly进行数据可视化，执行5段式skill逻辑, 生成图表并生成文字解读报告"
+---
+
+# Visualization Skill(5-Stage)
+
+## 1. 数据深度理解(Data Understanding)
+
+- **字段理解**: 强制检查`df.empty`及列名。提取数值列(`numeric_cols`)和分类列 (`categorical_cols`), 识别字段的作用, 为后续智能图表选择提供基础。
+- **数据分析**: 统计关键字段的有效值区间与数据分布，评估字段的展示价值(如：识别是否为常量列或无效ID列)，为坐标轴映射提供决策支持。
+- **返回摘要**: 将数据集的维度信息(shape)、特征关联预览及绘图约束封装为data_summary字典，构建智能体生成可视化代码的底层上下文。
+
+## 2. 智能图表选择(Chart Selecting)
+
+- **指令解析**: 从`user_input_prompt`中提取关键词(如"趋势"->line, "占比"->pie)选取最适图表类型。
+- **降级配置**: 若字段不匹配，依据`data_summary`强制选取数值列为Y轴，时间或分类列为X轴，确保生成的图表合理且程序不中断。
+- **元数据生成**: 包含标题、标签等配置的`chart_config`。
+
+## 3. Plotly图表生成(Plotly Generation)
+
+- **防御性逻辑**: **必须**将绘图代码包裹在`try-except`中。
+- **内置处理**: 若绘图失败，必须返回一个带有错误信息注值的`go.Figure()`对象，严禁报崩。
+- **样式规范**: 统一使用`plotly.express`或`graph_objects`，严禁使用任何`matplotlib`相关库。
+
+## 4. 文字解读报告(Insights Generation)
+
+- **深度分析**: 基于`fig`包含的数据点分析趋势、极值、异常值。
+- **异常修复**: 若第3步失败，此处需输出具体代码修复逻辑, **不需要向用户报告任何跟代码相关的信息, 只需报告数据分析的结果即可**。
+- **输出定位**: 此报告将作为代码块下方的最终呈现内容供用户阅读。
+
+## 5. 多轮迭代优化(Iteration Workflow)
+
+- **增量修改**: 支持基于`history`修改现有配置(如"颜色改为红色")。
+- **校验机制**: 迭代前重新校验新字段在`df`中的存在性。
+- **版本控制**: 物理保留旧配置，返回更新后的`config`以供重新绘图。
+
+## 强制约束(Mandatory Constraints)
+
+- **【格式要求】**：必须先输出Python代码块，然后在代码块外部输出环节4的文字解读报告。
+- **【库限制】**：严格禁止使用matplotlib, seaborn, plt以及statsmodels。仅允许使用plotly基础库。
+- **【核心禁令】**：严禁在px.scatter或其他图表中调用trendline参数(该参数强制依赖 statsmodels)，禁止调用fig.show()。
+- **【代码健壮性】**：所有图表逻辑必须仅依赖pandas和plotly的核心功能，禁止使用任何需要额外统计包支持的扩展功能。

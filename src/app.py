@@ -4,7 +4,8 @@ import pandas as pd
 import streamlit as st
 from data_processor import DataProcessor
 from llm_handler import LLMHandler
-from config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL
+from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -18,7 +19,7 @@ def main():
     if "llm" not in st.session_state:
         st.session_state.llm = LLMHandler(
             api_key=DEEPSEEK_API_KEY, 
-            base_url="https://api.deepseek.com",
+            base_url=DEEPSEEK_BASE_URL,
             model=DEEPSEEK_MODEL
         )
 
@@ -30,6 +31,12 @@ def main():
     uploaded_file = st.sidebar.file_uploader("上传CSV或Excel文件", type=["csv", "xlsx"])
 
     if uploaded_file is not None:
+        # 检查当前文件是否与上次记录的文件一致
+        if "current_file_name" not in st.session_state or st.session_state.current_file_name != uploaded_file.name:
+            st.session_state.current_file_name = uploaded_file.name
+            st.session_state.last_viz = None      # 清空上个表的图表结果
+            st.session_state.messages = []      # 清空聊天历史(防止AI参考旧表的字段)
+
         # 加载数据
         df = processor.load_data(uploaded_file)
         
@@ -41,12 +48,14 @@ def main():
             data_info = processor.get_basic_info()
 
             # 数据清洗
-            df = processor.basic_data_clean()
-
             with st.spinner("正在进行基础数据清洗..."):
-                if st.session_state.get("is_cleaned") is None:
-                    st.session_state["is_cleaned"] = True
+                if st.session_state.get(uploaded_file.name) is None:
+                    df = processor.basic_data_clean()
+                    st.session_state[uploaded_file.name] = True
                     st.toast("数据清洗完成！", icon="✅")
+                else:
+                    df = processor.basic_data_clean()
+
 
             # 展示数据集基本信息
             col1, col2, col3 = st.columns(3)
@@ -72,30 +81,35 @@ def main():
 
             st.markdown("---")
 
-            # --- 3. 自然语言交互模块 ---
-            st.subheader("🤖 AI 智能图表生成")
+            # 自然语言交互 
+            st.subheader("🤖 AI智能图表生成")
 
             # 初始化状态：增加用于存放“当前显示的图表结果”的容器
             if "messages" not in st.session_state:
                 st.session_state.messages = []
             if "last_viz" not in st.session_state:
-                st.session_state.last_viz = None # 存储最新的 {code, interpretation}
+                st.session_state.last_viz = None # 存储最新的{code, interpretation}
 
             # 用户输入指令
             if prompt := st.chat_input("请输入绘图指令..."):
                 with st.spinner("AI 正在分析并绘图..."):
+                    # 使用processor获取精简后的元数据和采样
+                    current_data_info = processor.get_basic_info()
+                    sample_df = processor.get_n_rows(5) 
+                    
                     result = st.session_state.llm.chat_for_visualization(
                         prompt, 
-                        df=df, 
+                        data_info=current_data_info, 
+                        sample_df=sample_df,
                         history=st.session_state.messages[-5:]
                     )
                     if result and result["code"]:
-                        # 【关键修改】将结果存入 session_state，防止 Slider 刷新导致消失
+                        # [关键修改]将结果存入session_state，防止Slider刷新导致消失
                         st.session_state.last_viz = result
                         st.session_state.messages.append({"role": "user", "content": prompt})
                         st.session_state.messages.append({"role": "assistant", "content": result["raw_response"]})
 
-            # --- 渲染区：放在 if prompt 之外，确保每次重跑都能显示 ---
+            # 渲染区：放在if prompt之外，确保每次重跑都能显示
             if st.session_state.last_viz:
                 viz = st.session_state.last_viz
                 try:
@@ -105,11 +119,31 @@ def main():
 
                     if fig:
                         st.markdown("---")
-                        # 使用固定 key 配合 session_state 里的信息
+                        # 使用固定key配合session_state里的信息
                         st.plotly_chart(fig, use_container_width=True, key="persistent_chart")
                         
                         st.markdown("#### 📊 可视化解读报告")
                         st.info(viz["interpretation"])
+
+                        # 文字报告下载
+                        st.markdown("---")
+                        
+                        # 构造下载内容
+                        download_content = (
+                            f"数据分析报告\n"
+                            f"对应文件: {uploaded_file.name}\n"
+                            f"生成时间: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                            f"{'='*30}\n\n"
+                            f"{viz["interpretation"]}"
+                        )
+
+                        # 提供TXT下载按钮
+                        st.download_button(
+                            label="📄 仅下载文字解读报告 (.txt)",
+                            data=download_content,
+                            file_name=f"分析报告_{uploaded_file.name.split('.')[0]}.txt",
+                            mime="text/plain",
+                        )
                 except Exception as e:
                     st.error(f"图表渲染出错: {e}")
 
