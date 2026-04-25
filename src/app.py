@@ -23,6 +23,10 @@ def main():
             model=DEEPSEEK_MODEL
         )
 
+    # 在main函数开始处初始化状态
+    if "is_generating" not in st.session_state:
+        st.session_state.is_generating = False # 标记当前是否正在生成图表，防止重复触发
+
     # 初始化数据处理模块
     processor = DataProcessor()
 
@@ -74,7 +78,7 @@ def main():
             st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
             # N行预览设置
-            n_preview = st.sidebar.slider("预览前N行数据", min_value=0, max_value=data_info['shape'][0], value=10, step=1)
+            n_preview = st.sidebar.slider("预览前N行数据", min_value=0, max_value=data_info['shape'][0], value=10, step=1, disabled=st.session_state.is_generating)
 
             st.markdown("### 🔍 数据预览")
             st.dataframe(processor.get_n_rows(n_preview), use_container_width=True)
@@ -91,61 +95,78 @@ def main():
                 st.session_state.last_viz = None # 存储最新的{code, interpretation}
 
             # 用户输入指令
-            if prompt := st.chat_input("请输入绘图指令..."):
-                with st.spinner("AI 正在分析并绘图..."):
-                    # 使用processor获取精简后的元数据和采样
-                    current_data_info = processor.get_basic_info()
-                    sample_df = processor.get_n_rows(5) 
-                    
-                    result = st.session_state.llm.chat_for_visualization(
-                        prompt, 
-                        data_info=current_data_info, 
-                        sample_df=sample_df,
-                        history=st.session_state.messages[-5:]
-                    )
-                    if result and result["code"]:
-                        # [关键修改]将结果存入session_state，防止Slider刷新导致消失
-                        st.session_state.last_viz = result
-                        st.session_state.messages.append({"role": "user", "content": prompt})
-                        st.session_state.messages.append({"role": "assistant", "content": result["raw_response"]})
+            if prompt := st.chat_input("请输入绘图指令... 如: 生成价格与时间的关系图", disabled=st.session_state.is_generating):
+                st.session_state.is_generating = True
+                st.session_state.current_prompt = prompt
+                st.rerun()
 
             # 渲染区：放在if prompt之外，确保每次重跑都能显示
             if st.session_state.last_viz:
                 viz = st.session_state.last_viz
-                try:
-                    exec_scope = {"df": df, "px": px, "go": go, "fig": None}
-                    exec(viz["code"], globals(), exec_scope)
-                    fig = exec_scope.get("fig")
 
-                    if fig:
-                        st.markdown("---")
-                        # 使用固定key配合session_state里的信息
-                        st.plotly_chart(fig, use_container_width=True, key="persistent_chart")
-                        
-                        st.markdown("#### 📊 可视化解读报告")
-                        st.info(viz["interpretation"])
+                with st.container():
+                    try:
+                        exec_scope = {"df": df, "px": px, "go": go, "fig": None}
+                        exec(viz["code"], globals(), exec_scope)
+                        fig = exec_scope.get("fig")
 
-                        # 文字报告下载
-                        st.markdown("---")
-                        
-                        # 构造下载内容
-                        download_content = (
-                            f"数据分析报告\n"
-                            f"对应文件: {uploaded_file.name}\n"
-                            f"生成时间: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                            f"{'='*30}\n\n"
-                            f"{viz["interpretation"]}"
-                        )
+                        if fig:
+                            st.markdown("---")
+                            # 使用固定key配合session_state里的信息
+                            st.plotly_chart(fig, use_container_width=True, key="persistent_chart")
+                            
+                            st.markdown("#### 📊 可视化解读报告")
+                            st.info(viz["interpretation"])
 
-                        # 提供TXT下载按钮
-                        st.download_button(
-                            label="📄 仅下载文字解读报告 (.txt)",
-                            data=download_content,
-                            file_name=f"分析报告_{uploaded_file.name.split('.')[0]}.txt",
-                            mime="text/plain",
-                        )
-                except Exception as e:
-                    st.error(f"图表渲染出错: {e}")
+                            # 文字报告下载
+                            st.markdown("---")
+                            
+                            # 构造下载内容
+                            download_content = (
+                                f"数据分析报告\n"
+                                f"对应文件: {uploaded_file.name}\n"
+                                f"生成时间: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                                f"{'='*30}\n\n"
+                                f"{viz['interpretation']}"
+                            )
+
+                            # 提供TXT下载按钮
+                            st.download_button(
+                                label="📄 仅下载文字解读报告 (.txt)",
+                                data=download_content,
+                                file_name=f"分析报告_{uploaded_file.name.split('.')[0]}.txt",
+                                mime="text/plain",
+                                disabled=st.session_state.is_generating
+                            )
+                    except Exception as e:
+                        st.error(f"图表渲染出错: {e}")
+
+            if st.session_state.is_generating:
+
+                current_prompt = st.session_state.get("current_prompt")
+
+                if current_prompt:
+                    with st.spinner("AI 正在分析并绘图..."):
+                        try:
+                            # 使用processor获取精简后的元数据和采样
+                            current_data_info = processor.get_basic_info()
+                            sample_df = processor.get_n_rows(5) 
+                            
+                            result = st.session_state.llm.chat_for_visualization(
+                                current_prompt, 
+                                data_info=current_data_info, 
+                                sample_df=sample_df,
+                                history=st.session_state.messages[-5:]
+                            )
+                            if result and result["code"]:
+                                # [关键修改]将结果存入session_state，防止Slider刷新导致消失
+                                st.session_state.last_viz = result
+                                st.session_state.messages.append({"role": "user", "content": current_prompt})
+                                st.session_state.messages.append({"role": "assistant", "content": result["raw_response"]})
+                        finally:
+                            st.session_state.is_generating = False
+                            st.session_state.current_prompt = None
+                            st.rerun()
 
 
 if __name__ == "__main__":
